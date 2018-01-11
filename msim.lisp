@@ -1,31 +1,9 @@
 (in-package :msim)
 
-(defun test (a)
-  (format t "~a" a))
-
-(test "a")
-
-
-(defun simulate-strat (strat pcs)
-  (declare (type (simple-array double-float (*)) pcs)
-           (type function strat))
-  #f
-  (let* ((n (length pcs))
-         (pos (make-array n :element-type 'fixnum)))
-    (declare (type fixnum n))
-    (dotimes (i n)
-      (declare (type fixnum i))
-      (setf (aref pos i) (the fixnum (funcall strat (aref pcs i)))))))
-
-(defun compile-strat (strat)
-  )
-
-
 (defun bootstrap-sum (arr inds)
   (let ((res 0))
     (loop for elem in inds do
-         (incf res)))
-  )
+         (incf res))))
 
 
 (defun bootstrap-sum (a inds)
@@ -45,17 +23,62 @@
     (cond ((atom strat) strat)
           (t (apply (car strat) (mapcar #'strategy-function (cdr strat)))))))
 
+
+(multiple-value-bind (a b) (values 1 2)
+  (format t "out: ~a ~a~%" a b)
+  (dotimes (i 10) 
+    (multiple-value-bind (a b) (values (* 2 a) (* 2 b))
+      (format t "in: ~a ~a~%" a b))))
+
+(defparameter +max+ 100)
+(declaim (type fixnum +max+))
+(defparameter *a*
+  (let ((a (make-array (+ +max+ 1) :element-type 'double-float)))
+    (dotimes (i +max+)
+      (setf (aref a i) (sin (* (/ (* 2.0 pi 2.0) +max+) i))))
+    a))
+
+(time (locally
+          (declare (optimize (speed 3) (safety 0)))
+        (multiple-value-bind (strategy-position strategy-slow-state)
+            (values 0 0.0d0)
+          ;; (declare (type fixnum strategy-position)
+          ;;          (type double-float strategy-slow-state))
+          (dotimes (i +max+)
+            (declare (type fixnum i))
+            (let* ((price (aref *a* i)))
+              (declare (type double-float price)
+                       (type (simple-array double-float (*)) *a*))
+              (multiple-value-bind (strategy-fast-value)
+                  (values price)
+                ;; (declare (type double-float strategy-fast-value))
+                (multiple-value-bind (strategy-slow-value strategy-slow-state)
+                    
+                    (let ((v (+ (* 0.1d0 price) (* 0.9d0 strategy-slow-state))))
+                      (values v v))
+                  ;; (declare (type double-float strategy-slow-value)
+                  ;;          (type double-float strategy-slow-state))
+                  (my-debug "second" t strategy-slow-value strategy-slow-state)
+                  (let ((strategy-position
+                         (if (>= strategy-fast-value strategy-slow-value)
+                             1
+                             -1)))
+                    (format t "~a: price ~a ema: ~a position: ~a~%" i price strategy-slow-state strategy-position)
+                    (values price strategy-position strategy-slow-state)))))))))
+
 (defmacro compile-strategy (strat n)
   (let* ((strat (strategy-function strat)))
-    `(multiple-value-bind ,(synth :state strat 'strategy) (values ,@(synth :init strat)) 
-       (dotimes (i ,n)
-         (let* ((price (sin (* (/ (* 2.0 pi 2.0) ,(- n 1)) i))))
-           (declare (type double-float price)) 
-           ;; (multiple-value-bind ,(synth :state strat 'strategy) ,(synth :update strat 'strategy))
-           ,(synth :update strat 'strategy)
-           ;; (multiple-value-bind (state) ,(synth :update strat 'state))
-           ;; (format t "i=~a price=~a ema=~a p=~a~%" i ,@(synth-all :name indicators) p)
-           )))))
+    `(locally 
+         #f
+       (multiple-value-bind ,(synth :state strat 'strategy) (values ,@(synth :init strat)) 
+         (dotimes (i ,n)
+           (declare ) (let* ((price (aref *a* i)))
+                (declare (type double-float price)) 
+                ;; (multiple-value-bind ,(synth :state strat 'strategy) ,(synth :update strat 'strategy))
+                ,(synth :update strat 'strategy)
+                ;; (multiple-value-bind (state) ,(synth :update strat 'state))
+                ;; (format t "i=~a price=~a ema=~a p=~a~%" i ,@(synth-all :name indicators) p)
+                ))))))
 
 (defprim ema (alpha)
   (:pretty () (list 'ema (list :alpha alpha)))
@@ -185,7 +208,7 @@
   
  (compile-strategy (cross (price) (ema 0.1d0) 
                            (bullish)
-                           (bearish)) 1000000001)
+                           (bearish)) +max+)
   ;; (pprint (synth :indicators strat))
   )
 
