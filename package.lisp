@@ -2,6 +2,7 @@
   (:use :cl)
   (:export :this :it
            :aif 
+           :defmacro!
            :pandoriclet :get-pandoric  :dlambda :flatten :group :mkstr :symb :keyw))
 
 (defpackage :utils
