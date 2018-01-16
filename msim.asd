@@ -8,4 +8,5 @@
                (:file "parser")
                (:file "grammar") 
                (:file "utils")
+               (:file "iter")
                (:file "msim")))
