@@ -109,6 +109,20 @@
           ;; (read)
           ))
 
+(defmacro my-debug (&rest vars)
+  `(progn ;; (format t "~?:" ,message nil)
+          ,@(mapcar (lambda (var)
+                      `(format t " ~a = ~a" ',var ,var))
+                    vars)
+          ;; (if ,eol (terpri))
+          (terpri)
+          ;; (read)
+          ))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun keyw (&rest args)
+    (values (intern (apply #'mkstr args) "KEYWORD"))))
+
 (defun hash-table-keys (table)
   (loop for key being the hash-keys of table collect key))
 (defun hash-table-values (table)

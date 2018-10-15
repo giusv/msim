@@ -1,3 +1,5 @@
+(in-package #:let-over-lambda)
+
 ;; Antiweb (C) Doug Hoyte
 
 ;; This is a "production" version of LOL with bug-fixes
@@ -20,22 +22,19 @@
 ;; code useful, or would like documentation,
 ;; please consider buying the book!
 
+;; Modifications by "the Phoeron" Colin J.E. Lupton, 2012--2014
+;; - Support for ASDF/Quicklisp
+;; - Cheap hacks to support new Backquote implementation in SBCL v1.2.2
 
-(in-package :lol)
-
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun mkstr (&rest args)
-    (with-output-to-string (s)
-      (dolist (a (remove nil args)) (princ a s)))))
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun symb (&rest args)
-    (values (intern (apply #'mkstr args)))))
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun keyw (&rest args)
-   (values (intern (apply #'mkstr args) "KEYWORD"))))
+;; Safety feature for SBCL>=v1.2.2
+#+sbcl
+(eval-when (:compile-toplevel :execute)
+  (handler-case
+      (progn
+        (sb-ext:assert-version->= 1 2 2)
+        (setq *features* (remove 'old-sbcl *features*)))
+    (error ()
+      (pushnew 'old-sbcl *features*))))
 
 (defun group (source n)
   (if (zerop n) (error "zero length"))
@@ -49,163 +48,161 @@
                      (cons source acc))))))
     (if source (rec source nil) nil)))
 
+(eval-when (:compile-toplevel :execute :load-toplevel)
+  (defun mkstr (&rest args)
+    (with-output-to-string (s)
+      (dolist (a args) (princ a s))))
 
+  (defun symb (&rest args)
+    (values (intern (apply #'mkstr args))))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun flatten (x)
     (labels ((rec (x acc)
-               (cond ((null x) acc)
-                     ((atom x) (cons x acc))
-                     (t (rec
-                         (car x)
-                         (rec (cdr x) acc))))))
-      (rec x nil))))
+                  (cond ((null x) acc)
+                        #+(and sbcl (not lol::old-sbcl))
+                        ((typep x 'sb-impl::comma) (rec (sb-impl::comma-expr x) acc))
+                        ((atom x) (cons x acc))
+                        (t (rec
+                             (car x)
+                             (rec (cdr x) acc))))))
+      (rec x nil)))
 
-
-
-;; (defun fact (x)
-;;   (if (= x 0)
-;;     1
-;;     (* x (fact (- x 1)))))
-
-;; (defun choose (n r)
-;;   (/ (fact n)
-;;      (fact (- n r))
-;;      (fact r)))
-
-
-
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun g!-symbol-p (s)
     (and (symbolp s)
          (> (length (symbol-name s)) 2)
          (string= (symbol-name s)
                   "G!"
                   :start1 0
-                  :end1 2))))
+                  :end1 2)))
 
-
-
-(defmacro defmacro/g! (name args &rest body)
-  (let ((syms (remove-duplicates
-                (remove-if-not #'g!-symbol-p
-                               (flatten body)))))
-    `(defmacro ,name ,args
-       (let ,(mapcar
-               (lambda (s)
-                 `(,s (gensym ,(subseq
-                                 (symbol-name s)
-                                 2))))
-               syms)
-         ,@body))))
-
-
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun o!-symbol-p (s)
     (and (symbolp s)
          (> (length (symbol-name s)) 2)
          (string= (symbol-name s)
                   "O!"
                   :start1 0
-                  :end1 2))))
+                  :end1 2)))
 
-(defun o!-symbol-to-g!-symbol (s)
-  (symb "G!"
-        (subseq (symbol-name s) 2)))
+  (defun o!-symbol-to-g!-symbol (s)
+    (symb "G!"
+          (subseq (symbol-name s) 2))))
 
-
+(defmacro defmacro/g! (name args &rest body)
+  (let ((syms (remove-duplicates
+               (remove-if-not #'g!-symbol-p
+                              (flatten body)))))
+    (multiple-value-bind (body declarations docstring)
+        (parse-body body :documentation t)
+      `(defmacro ,name ,args
+         ,@(when docstring
+             (list docstring))
+         ,@declarations
+         (let ,(mapcar
+                (lambda (s)
+                  `(,s (gensym ,(subseq
+                                 (symbol-name s)
+                                 2))))
+                syms)
+           ,@body)))))
 
 (defmacro defmacro! (name args &rest body)
-  (let* ((os (remove-if-not #'o!-symbol-p args))
+  (let* ((os (remove-if-not #'o!-symbol-p (flatten args)))
          (gs (mapcar #'o!-symbol-to-g!-symbol os)))
-    `(defmacro/g! ,name ,args
-       `(let ,(mapcar #'list (list ,@gs) (list ,@os))
-          ,(progn ,@body)))))
+    (multiple-value-bind (body declarations docstring)
+        (parse-body body :documentation t)
+      `(defmacro/g! ,name ,args
+         ,@(when docstring
+            (list docstring))
+         ,@declarations
+         `(let ,(mapcar #'list (list ,@gs) (list ,@os))
+            ,(progn ,@body))))))
 
-
-
+(defmacro defun! (name args &body body)
+  (let ((syms (remove-duplicates
+               (remove-if-not #'g!-symbol-p
+                              (flatten body)))))
+    (multiple-value-bind (body declarations docstring)
+        (parse-body body :documentation t)
+      `(defun ,name ,args
+         ,@(when docstring
+             (list docstring))
+         ,@declarations
+         (let ,(mapcar (lambda (s)
+                         `(,s (gensym ,(subseq (symbol-name s)
+                                               2))))
+                       syms)
+           ,@body)))))
 
 ;; Nestable suggestion from Daniel Herring
-
-(defun |#"-reader| (stream sub-char numarg)
-  (declare (ignore sub-char numarg))
-  (let (chars (state 'normal) (depth 1))
-    (loop do
-      (let ((curr (read-char stream)))
-        (cond ((eq state 'normal)
-                 (cond ((char= curr #\#)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+ (defun |#"-reader| (stream sub-char numarg)
+   (declare (ignore sub-char numarg))
+   (let (chars (state 'normal) (depth 1))
+     (loop do
+          (let ((curr (read-char stream)))
+            (cond ((eq state 'normal)
+                   (cond ((char= curr #\#)
                           (push #\# chars)
                           (setq state 'read-sharp))
-                       ((char= curr #\")
+                         ((char= curr #\")
                           (setq state 'read-quote))
-                       (t
+                         (t
                           (push curr chars))))
-              ((eq state 'read-sharp)
-                 (cond ((char= curr #\")
+                  ((eq state 'read-sharp)
+                   (cond ((char= curr #\")
                           (push #\" chars)
                           (incf depth)
                           (setq state 'normal))
-                       (t
+                         (t
                           (push curr chars)
                           (setq state 'normal))))
-              ((eq state 'read-quote)
-                 (cond ((char= curr #\#)
+                  ((eq state 'read-quote)
+                   (cond ((char= curr #\#)
                           (decf depth)
                           (if (zerop depth) (return))
                           (push #\" chars)
                           (push #\# chars)
                           (setq state 'normal))
-                       (t
+                         (t
                           (push #\" chars)
                           (if (char= curr #\")
-                            (setq state 'read-quote)
-                            (progn
-                              (push curr chars)
-                              (setq state 'normal)))))))))
-   (coerce (nreverse chars) 'string)))
+                              (setq state 'read-quote)
+                              (progn
+                                (push curr chars)
+                                (setq state 'normal)))))))))
+     (coerce (nreverse chars) 'string))))
 
-(set-dispatch-macro-character
-  #\# #\" #'|#"-reader|)
-
-
-
-
+; (set-dispatch-macro-character #\# #\" #'|#"-reader|)
 
 ; This version is from Martin Dirichs
-
-(defun |#>-reader| (stream sub-char numarg)
-  (declare (ignore sub-char numarg))
-  (let (chars)
-    (do ((curr (read-char stream)
-               (read-char stream)))
-        ((char= #\newline curr))
-      (push curr chars))
-    (let ((pattern (nreverse chars))
-          output)
-      (labels ((match (pos chars)
-        (if (null chars)
-          pos
-          (if (char= (nth pos pattern) (car chars))
-              (match (1+ pos) (cdr chars))
-              (match 0 (cdr (append (subseq pattern 0 pos) chars)))))))
-        (do (curr
-             (pos 0))
-            ((= pos (length pattern)))
-          (setf curr (read-char stream)
-                pos (match pos (list curr)))
-          (push curr output))
-        (coerce
-          (nreverse
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun |#>-reader| (stream sub-char numarg)
+    (declare (ignore sub-char numarg))
+    (let (chars)
+      (do ((curr (read-char stream)
+                 (read-char stream)))
+          ((char= #\newline curr))
+        (push curr chars))
+      (let ((pattern (nreverse chars))
+            output)
+        (labels ((match (pos chars)
+                   (if (null chars)
+                       pos
+                       (if (char= (nth pos pattern) (car chars))
+                           (match (1+ pos) (cdr chars))
+                           (match 0 (cdr (append (subseq pattern 0 pos) chars)))))))
+          (do (curr
+               (pos 0))
+              ((= pos (length pattern)))
+            (setf curr (read-char stream)
+                  pos (match pos (list curr)))
+            (push curr output))
+          (coerce
+           (nreverse
             (nthcdr (length pattern) output))
-          'string)))))
+           'string))))))
 
-
-(set-dispatch-macro-character
-  #\# #\> #'|#>-reader|)
-
-
+; (set-dispatch-macro-character #\# #\> #'|#>-reader|)
 
 (defun segment-reader (stream ch n)
   (if (> n 0)
@@ -217,12 +214,10 @@
       (cons (coerce (nreverse chars) 'string)
             (segment-reader stream ch (- n 1))))))
 
-
-
 #+cl-ppcre
 (defmacro! match-mode-ppcre-lambda-form (o!args o!mods)
  ``(lambda (,',g!str)
-     (cl-ppcre:scan
+     (ppcre:scan-to-strings
        ,(if (zerop (length ,g!mods))
           (car ,g!args)
           (format nil "(?~a)~a" ,g!mods (car ,g!args)))
@@ -236,38 +231,30 @@
        ,',g!str
        ,(cadr ,g!args))))
 
-
-
 #+cl-ppcre
-(defun |#~-reader| (stream sub-char numarg)
-  (declare (ignore sub-char numarg))
-  (let ((mode-char (read-char stream)))
-    (cond
-      ((char= mode-char #\m)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun |#~-reader| (stream sub-char numarg)
+    (declare (ignore sub-char numarg))
+    (let ((mode-char (read-char stream)))
+      (cond
+        ((char= mode-char #\m)
          (match-mode-ppcre-lambda-form
-           (segment-reader stream
-                           (read-char stream)
-                           1)
-           (coerce (loop for c = (read-char stream)
-                         while (alpha-char-p c)
-                         collect c
-                         finally (unread-char c stream))
-                   'string)))
-      ((char= mode-char #\s)
+          (segment-reader stream
+                          (read-char stream)
+                          1)
+          (coerce (loop for c = (read-char stream)
+                     while (alpha-char-p c)
+                     collect c
+                     finally (unread-char c stream))
+                  'string)))
+        ((char= mode-char #\s)
          (subst-mode-ppcre-lambda-form
-           (segment-reader stream
-                           (read-char stream)
-                           2)))
-      (t (error "Unknown #~~ mode character")))))
+          (segment-reader stream
+                          (read-char stream)
+                          2)))
+        (t (error "Unknown #~~ mode character"))))))
 
-#+cl-ppcre
-(set-dispatch-macro-character #\# #\~ #'|#~-reader|)
-
-
-
-
-
-
+; #+cl-ppcre (set-dispatch-macro-character #\# #\~ #'|#~-reader|)
 
 (defmacro! dlambda (&rest ds)
   `(lambda (&rest ,g!args)
@@ -283,44 +270,68 @@
                          `(cdr ,g!args)))))
            ds))))
 
-
-
 ;; Graham's alambda
 (defmacro alambda (parms &body body)
   `(labels ((self ,parms ,@body))
      #'self))
-
-
 
 ;; Graham's aif
 (defmacro aif (test then &optional else)
   `(let ((it ,test))
      (if it ,then ,else)))
 
-
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel :execute :load-toplevel)
   (defun |#`-reader| (stream sub-char numarg)
-                (declare (ignore sub-char))
-                (unless numarg (setq numarg 1))
-                `(lambda ,(loop for i from 1 to numarg
-                             collect (symb 'a i))
-                   ,(funcall
-                     (get-macro-character #\`) stream nil))))
+    (declare (ignore sub-char))
+    (unless numarg (setq numarg 1))
+    `(lambda ,(loop for i from 1 to numarg
+                 collect (symb 'a i))
+       ,(funcall
+         (get-macro-character #\`) stream nil)))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (set-dispatch-macro-character
-   #\# #\` #'|#`-reader|))
+  (defun |#f-reader| (stream sub-char numarg)
+    (declare (ignore stream sub-char))
+    (setq numarg (or numarg 3))
+    (unless (<= numarg 3)
+      (error "Bad value for #f: ~a" numarg))
+    `(declare (optimize (speed ,numarg)
+                        (safety ,(- 3 numarg)))))
 
+  (defreadtable lol-syntax
+    (:merge :standard)
+    (:dispatch-macro-char #\# #\" #'|#"-reader|)
+    (:dispatch-macro-char #\# #\> #'|#>-reader|)
+    #+cl-ppcre
+    (:dispatch-macro-char #\# #\~ #'|#~-reader|)
+    (:dispatch-macro-char #\# #\` #'|#`-reader|)
+    (:dispatch-macro-char #\# #\f #'|#f-reader|)))
 
+(in-readtable lol-syntax)
+
+(defmacro! nlet-tail (n letargs &body body)
+  (let ((gs (loop for i in letargs
+               collect (gensym))))
+    `(macrolet
+         ((,n ,gs
+            `(progn
+               (psetq
+                ,@(apply #'nconc
+                         (mapcar
+                          #'list
+                          ',(mapcar #'car letargs)
+                          (list ,@gs))))
+               (go ,',g!n))))
+       (block ,g!b
+         (let ,letargs
+           (tagbody
+              ,g!n (return-from
+                    ,g!b (progn ,@body))))))))
 
 (defmacro alet% (letargs &rest body)
   `(let ((this) ,@letargs)
      (setq this ,@(last body))
      ,@(butlast body)
      this))
-
-
 
 (defmacro alet (letargs &rest body)
   `(let ((this) ,@letargs)
@@ -329,9 +340,7 @@
      (lambda (&rest params)
        (apply this params))))
 
-
-
-(defun let-bindibb-transform (bs)
+(defun let-binding-transform (bs)
   (if bs
     (cons
       (cond ((symbolp (car bs))
@@ -340,7 +349,23 @@
               (car bs))
             (t
               (error "Bad let bindings")))
-      (let-bindibb-transform (cdr bs)))))
+      (let-binding-transform (cdr bs)))))
+
+(defmacro pandoriclet (letargs &rest body)
+  (let ((letargs (cons
+                   '(this)
+                   (let-binding-transform
+                     letargs))))
+    `(let (,@letargs)
+       (setq this ,@(last body))
+       ,@(butlast body)
+       (dlambda
+         (:pandoric-get (sym)
+           ,(pandoriclet-get letargs))
+         (:pandoric-set (sym val)
+           ,(pandoriclet-set letargs))
+         (t (&rest args)
+           (apply this args))))))
 
 (defun pandoriclet-get (letargs)
   `(case sym
@@ -359,22 +384,6 @@
           "Unknown pandoric set: ~a"
           sym))))
 
-(defmacro pandoriclet (letargs &body body)
-  (let ((letargs (cons
-                   '(this)
-                   (let-bindibb-transform
-                     letargs))))
-    `(let (,@letargs)
-       (setq this ,@(last body))
-       ,@(butlast body)
-       (dlambda
-         (:pandoric-get (sym)
-           ,(pandoriclet-get letargs))
-         (:pandoric-set (sym val)
-           ,(pandoriclet-set letargs))
-         (t (&rest args)
-           (apply this args))))))
-
 (declaim (inline get-pandoric))
 
 (defun get-pandoric (box sym)
@@ -385,8 +394,6 @@
      (funcall ,box :pandoric-set ,sym ,val)
      ,val))
 
-
-
 (defmacro with-pandoric (syms box &rest body)
   (let ((g!box (gensym "box")))
     `(let ((,g!box ,box))
@@ -396,19 +403,13 @@
                     syms))
          ,@body))))
 
-
-
 (defun pandoric-hotpatch (box new)
   (with-pandoric (this) box
     (setq this new)))
 
-
-
 (defmacro pandoric-recode (vars box new)
   `(with-pandoric (this ,@vars) ,box
      (setq this ,new)))
-
-
 
 (defmacro plambda (largs pargs &rest body)
   (let ((pargs (mapcar #'list pargs)))
@@ -423,8 +424,6 @@
                 (t (&rest args)
                   (apply this args)))))))
 
-
-
 (defvar pandoric-eval-tunnel)
 
 (defmacro pandoric-eval (vars expr)
@@ -434,32 +433,23 @@
               ,',vars pandoric-eval-tunnel
               ,,expr))))
 
-
 ;; Chapter 7
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (set-dispatch-macro-character #\# #\f
-                                (lambda (stream sub-char numarg)
-                                  (declare (ignore stream sub-char))
-                                  (setq numarg (or numarg 3))
-                                  (unless (<= numarg 3)
-                                    (error "Bad value for #f: ~a" numarg))
-                                  `(declare (optimize (speed ,numarg)
-                                                      (safety ,(- 3 numarg)))))))
-
-
+;; (eval-when (:compile-toplevel :load-toplevel :execute)
+;;   (set-dispatch-macro-character #\# #\f
+;;                                 (lambda (stream sub-char numarg)
+;;                                   (declare (ignore stream sub-char))
+;;                                   (setq numarg (or numarg 3))
+;;                                   (unless (<= numarg 3)
+;;                                     (error "Bad value for #f: ~a" numarg))
+;;                                   `(declare (optimize (speed ,numarg)
+;;                                                       (safety ,(- 3 numarg)))))))
 
 (defmacro fast-progn (&rest body)
   `(locally #f ,@body))
 
-
-
 (defmacro safe-progn (&rest body)
   `(locally #0f ,@body))
-
-
-
-
 
 (defun fformat (&rest all)
   (apply #'format all))
@@ -477,8 +467,6 @@
              ,g!stream ,@args))))
     form))
 
-
-
 (declaim (inline make-tlist tlist-left
                  tlist-right tlist-empty-p))
 
@@ -486,8 +474,6 @@
 (defun tlist-left (tl) (caar tl))
 (defun tlist-right (tl) (cadr tl))
 (defun tlist-empty-p (tl) (null (car tl)))
-
-
 
 (declaim (inline tlist-add-left
                  tlist-add-right))
@@ -505,8 +491,6 @@
       (setf (cddr tl) x))
     (setf (cdr tl) x)))
 
-
-
 (declaim (inline tlist-rem-left))
 
 (defun tlist-rem-left (tl)
@@ -518,14 +502,10 @@
         (setf (cdr tl) nil)) ;; For gc
       (car x))))
 
-
-
 (declaim (inline tlist-update))
 
 (defun tlist-update (tl)
   (setf (cdr tl) (last (car tl))))
-
-
 
 (defun build-batcher-sn (n)
   (let* (network
@@ -546,8 +526,6 @@
       (setf p (ash p -1)))
     (nreverse network)))
 
-
-
 (defmacro! sortf (comparator &rest places)
   (if places
     `(tagbody
@@ -559,15 +537,7 @@
                        #2# ,g!a)))
            (build-batcher-sn (length places))))))
 
-
-
-
-
-
 ;;;;;; NEW CODE FOR ANTIWEB
-
-
-
 #+cl-ppcre
 (defun dollar-symbol-p (s)
   (and (symbolp s)
@@ -578,40 +548,36 @@
                 :end1 1)
        (ignore-errors (parse-integer (subseq (symbol-name s) 1)))))
 
-
-
-(defun prune-if-match-bodies-from-sub-lexical-scope (tree)
-  (if (consp tree)
-    (if (or (eq (car tree) 'if-match)
-            (eq (car tree) 'when-match))
-      (cddr tree)
-      (cons (prune-if-match-bodies-from-sub-lexical-scope (car tree))
-            (prune-if-match-bodies-from-sub-lexical-scope (cdr tree))))
-    tree))
-
-;; WARNING: Not %100 correct. Removes forms like (... if-match ...) from the
-;; sub-lexical scope even though this isn't an invocation of the macro.
-#+cl-ppcre
-(defmacro! if-match ((test str) conseq &optional altern)
-  (let ((dollars (remove-duplicates
+(defmacro! if-match ((match-regex str) then &optional else)
+  (let* ((dollars (remove-duplicates
                    (remove-if-not #'dollar-symbol-p
-                                  (flatten (prune-if-match-bodies-from-sub-lexical-scope conseq))))))
-    (let ((top (or (car (sort (mapcar #'dollar-symbol-p dollars) #'>)) 0)))
-      `(let ((,g!str ,str))
-         (multiple-value-bind (,g!s ,g!e ,g!ms ,g!me) (,test ,g!str)
-           (declare (ignorable ,g!e ,g!me))
-           (if ,g!s
-             (if (< (length ,g!ms) ,top)
-               (error "ifmatch: too few matches")
-               (let ,(mapcar #`(,(symb "$" a1) (subseq ,g!str (aref ,g!ms ,(1- a1))
-                                                              (aref ,g!me ,(1- a1))))
-                             (loop for i from 1 to top collect i))
-                 ,conseq))
-              ,altern))))))
-
-(defmacro when-match ((test str) conseq &rest more-conseq)
-  `(if-match (,test ,str)
-     (progn ,conseq ,@more-conseq)))
+                                  (flatten then))))
+         (top (or (car (sort (mapcar #'dollar-symbol-p dollars) #'>))
+                  0)))
+    `(multiple-value-bind (,g!matches ,g!captures) (,match-regex ,str)
+       (declare (ignorable ,g!matches ,g!captures))
+       (let ((,g!captures-len (length ,g!captures)))
+         (declare (ignorable ,g!captures-len))
+         (symbol-macrolet ,(mapcar #`(,(symb "$" a1)
+                                       (if (< ,g!captures-len ,a1)
+                                           (error "Too few matchs: ~a unbound." ,(mkstr "$" a1))
+                                           (aref ,g!captures ,(1- a1))))
+                                   (loop for i from 1 to top collect i))
+           (if ,g!matches
+               ,then
+               ,else))))))
 
 
+(defmacro when-match ((match-regex str) &body forms)
+  `(if-match (,match-regex ,str)
+     (progn ,@forms)))
 
+
+(defmacro/g! nif (expr pos zero neg) 
+  `(let ((,g!result ,expr)) 
+     (cond ((plusp ,g!result) ,pos) 
+           ((zerop ,g!result) ,zero) 
+           (t ,neg))))
+
+;; EOF
+ 

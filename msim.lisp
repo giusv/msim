@@ -1,5 +1,5 @@
 (in-package :msim)
-
+(in-readtable lol-syntax)
 ;; (defun bootstrap-sum (arr inds)
 ;;   (let ((res 0))
 ;;     (loop for elem in inds do
@@ -186,9 +186,10 @@
   (let* ((strat (strategy-function strat)))
     `(locally 
          #f
-       (multiple-value-do (((i) 0 (1+ i)) 
+       (multiple-value-do (((i) 0 (declare (type fixnum i)) (1+ i)) 
                            (,(synth :state strat 'strategy) (values ,@(synth :init strat)) 
                              (let* ((price (aref *a* i)))
+                               (declare (type double-float price))
                                ;; (my-debug "loop" t i price strategy-position)
                                (values ,(synth :update strat 'strategy)))))
            ((equal i ,n) 'done)))))
@@ -202,52 +203,54 @@
     a))
 
 
-;; (defun main3 ()
-;;   ;; (compile-strategy (cross (price) (ema 0.1d0) 
-;;   ;;                          (cross (price) (ema 0.8d0) (bullish) (neutral))
-;;   ;;                          (cross (price) (ema 0.8d0) (neutral) (bearish))) 1000000001)
+(defun main3 ()
+  ;; (compile-strategy (cross (price) (ema 0.1d0) 
+  ;;                          (cross (price) (ema 0.8d0) (bullish) (neutral))
+  ;;                          (cross (price) (ema 0.8d0) (neutral) (bearish))) 1000000001)
   
 
   
-;;   (compile-strategy (cross (price) (ema 0.1d0) 
-;;                            (bullish)
-;;                            (bearish)) +max+)
-;;   ;; (pprint (synth :indicators strat))
-;;   )
+  (compile-strategy (cross (price) (ema 0.1d0) 
+                           (bullish)
+                           (bearish)) +max+)
+  ;; (pprint (synth :indicators strat))
+  )
 
 ;; (time (main3))
 
 
 
-(defun main4 (a)
-  (locally
-      (declare (optimize (speed 3) (safety 0)))
-    (declare (type (simple-array double-float (*)) a))
-    (block nil
-      (multiple-value-bind (i)
-          0
-        (declare (type fixnum i))
-        (multiple-value-bind (strategy-position strategy-slow-state)
-            (values 0 0.0d0)
-          (loop (when (equal i +max+) (return (progn 'done)))
-             (multiple-value-bind (new-i)
-                 (1+ i)
-               (multiple-value-bind (new-strategy-position new-strategy-slow-state)
-                   (let* ((price (aref a i)))
-                     (declare (type double-float price))
-                     (values
-                      (multiple-value-bind (strategy-fast-value)
-                          (values price)
-                        (multiple-value-bind (strategy-slow-value strategy-slow-state)
-                            (let ((v (+ (* 0.1d0 price) (* 0.9d0 strategy-slow-state))))
-                              (values v v))
-                          (let ((strategy-position
-                                 (if (>= strategy-fast-value strategy-slow-value)
-                                     1
-                                     -1)))
-                            (values strategy-position strategy-slow-state))))))
-                 (progn
-                   (setq i new-i)
-                   (setq strategy-position new-strategy-position)
-                   (setq strategy-slow-state new-strategy-slow-state))))))))))
-(time (main4 *a*))
+;; (defun main4 (a)
+;;   (locally
+;;       (declare (optimize (speed 3) (safety 0)))
+;;     (declare (type (simple-array double-float (*)) a))
+;;     (block nil
+;;       (multiple-value-bind (i)
+;;           0
+        
+;;         (multiple-value-bind (strategy-position strategy-slow-state)
+;;             (values 0 0.0d0)
+;;           (loop (when (equal i +max+) (return (progn 'done)))
+;;              (multiple-value-bind (new-i)
+;;                  (1+ i)
+;;                (multiple-value-bind (new-strategy-position new-strategy-slow-state)
+;;                    (let* ((price (aref a i)))
+;;                      (declare (type double-float price))
+;;                      (values
+;;                       (multiple-value-bind (strategy-fast-value)
+;;                           (values price)
+;;                         (multiple-value-bind (strategy-slow-value strategy-slow-state)
+;;                             (let ((v (+ (* 0.1d0 price) (* 0.9d0 strategy-slow-state))))
+;;                               (values v v))
+;;                           (let ((strategy-position
+;;                                  (if (>= strategy-fast-value strategy-slow-value)
+;;                                      1
+;;                                      -1)))
+;;                             (values strategy-position strategy-slow-state))))))
+;;                  (declare (type fixnum i))
+;;                  (progn
+;;                    (setq i new-i)
+;;                    (setq strategy-position new-strategy-position)
+;;                    (setq strategy-slow-state new-strategy-slow-state))))))))))
+;; (time (dotimes (i 1) 
+;;         (main4 *a*)))

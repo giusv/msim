@@ -3,10 +3,21 @@
   :description "Msim market simulator"
   :author "Giuseppe Viola gius.viola@gmail.com"
   :license ""
+  :depends-on (#:alexandria
+               #:cl-ppcre
+               #:named-readtables
+               ;; #:cffi
+               ;; #:clsql
+               ;; #:drakma
+               )
   :components ((:file "package")
                (:file "lol")
+               (:file "utils")
                (:file "parser")
                (:file "grammar") 
-               (:file "utils")
                (:file "iter")
-               (:file "msim")))
+               (:file "compiler")
+               ;; (:file "msim")
+               ;; (:file "dbtest")
+               ;; (:file "clostest")
+               ))

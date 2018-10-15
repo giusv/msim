@@ -1,5 +1,5 @@
 (in-package :grammar)
-
+(in-readtable lol-syntax)
 ;; (defmacro defprim (name args &rest attrs)
 ;;   `(defun ,name ,args
 ;;      (pandoriclet ,(mapcar #`(,a1 ,a1) (parser:arg-names args))
