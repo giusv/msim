@@ -172,77 +172,90 @@
 ;;                           (bearish))))
 ;;   (pprint (synth :state s 'strategy)))
 
-(with-tactics (state update)
-  (cross (price) (ema 0.1d0) 
-         (bullish)
-         (bearish))
+ ;; (with-tactics (state update)
+ ;;  (cross (price) (ema 0.1d0) 
+ ;;         (bullish)
+ ;;         (bearish))
   
-  )
+ ;;  )
 
-(defun compile-tactics (tact)
-  (let* ((tact (eval tact))
-         (tact-name (symb (synth :name tact))))
-    `(progn
-       (makunbound ',tact-name)
-       (defstruct ,tact-name
-         ,@(map 'list (lambda (s i y) (list s i :type y))
-                (synth :state tact 'strategy)
-                (synth :init tact)
-                (synth :type tact)))
-       (declaim (inline update))
-       (defun update (state price)
-         (declare (type ,tact-name state)
-                  (type double-float price))
-         (symbol-macrolet ,(mapcar #`(,a1 (,(symb tact-name "-" a1) state))
-                                   (synth :state tact 'strategy)) 
-           (values ,(synth :update tact 'strategy 'price) state))))))
+;; (defun compile-tactics (tact)
+;;   (let* ((tact (eval tact))
+;;          (tact-name (symb (synth :name tact))))
+;;     `(progn
+;;        (makunbound ',tact-name)
+;;        (defstruct ,tact-name
+;;          ,@(map 'list (lambda (s i y) (list s i :type y))
+;;                 (synth :state tact 'strategy)
+;;                 (synth :init tact)
+;;                 (synth :type tact)))
+;;        (declaim (inline update))
+;;        (defun update (state price)
+;;          (declare (type ,tact-name state)
+;;                   (type double-float price))
+;;          (symbol-macrolet ,(mapcar #`(,a1 (,(symb tact-name "-" a1) state))
+;;                                    (synth :state tact 'strategy)) 
+;;            (values ,(synth :update tact 'strategy 'price) state))))))
 
 (defun compile-tactics-to-lambda (tact)
   (let* ((tact (eval tact))
-         (state-list (synth :state tact 'strategy)))
+         (tact-name (symb (synth :name tact)))
+         ;; (tact-name (symb (gensym (synth :name tact))))
+         ;; (tact-name (symb (gensym)))
+         ;; (tact-name (symb (synth :name tact) 676))
+         )
     `(lambda (price)
        (declare (type (simple-array double-float (*)) price))
-       (let ((state (make-array ,(length state-list)
-                                :initial-contents (list ,@(synth :init tact))))
-             (len (length price))) 
+       (progn
+         
+         (defstruct ,tact-name
+           ,@(map 'list (lambda (s i y) (list s i :type y))
+                  (synth :state tact 'strategy)
+                  (synth :init tact)
+                  (synth :type tact)))
+         ;; (declaim (inline update))
          (flet ((update (state price)
-                  (declare ;; (type (simple-array (*)) state)
+                  (declare (type ,tact-name state)
                            (type double-float price))
-                  (symbol-macrolet ,(mapcar #2`(,a1 (aref state ,a2))
-                                            state-list
-                                            (loop for i from 0 to (- (length state-list) 1)
-                                               collecting i))
+                  (symbol-macrolet ,(mapcar #`(,a1 (,(symb tact-name '- a1) state))
+                                            (synth :state tact 'strategy)) 
                     (values ,(synth :update tact 'strategy 'price) state))))
            (declare (inline update))
-           (time (fast-progn
-                  (loop for i fixnum from 0 to (the fixnum (- len 1)) do
-                       (multiple-value-bind (p state)
-                           (update state (the double-float (aref price i)))
+           (let ((state (,(symb 'make- tact-name)))
+                 (len (length price)))
+             ;; (pprint state)
+             (time (fast-progn
+                    (loop for i fixnum from 0 to (the fixnum (- len 1)) do
+                         (multiple-value-bind (p state)
+                             (update state (the double-float (aref price i)))
                                         ;(pprint state)
-                         ;; (pprint p)
-                         state
-                         p
-                         ) 
-                     ;; (format t "~{~20,8f~^|~}|~20,8f~%" (funcall s :state) pos)
-                       )))
-           )
-         ;; (makunbound ',tact-name)
-         ;; (makunbound 'update)
-         ))))
-(pprint (compile-tactics-to-lambda  (cross (price) (ema 0.1d0) 
-                                    (bullish)
-                                    (bearish))))
-
+                           ;; (pprint p)
+                           state
+                           p
+                           ) 
+                       ;; (format t "~{~20,8f~^|~}|~20,8f~%" (funcall s :state) pos)
+                         )))
+             ))
+         ;; (unintern 'sdjkvahlkser)
+        ))))
+(pprint (compile-tactics-to-lambda (cross (price) (ema 0.1d0) 
+                                   (bullish)
+                                   (bearish))))
 (defun simulate-tactics (tact price)
-  (let* ((simulate (compile nil (compile-tactics-to-lambda tact))))
+  (let* ((tact (eval tact))
+         ;; (tact-name (symb (synth :name tact)))
+         ;; (tact-name (gensym (mkstr (synth :name tact))))
+         (simulate (compile nil
+                            (compile-tactics-to-lambda tact))))
     (funcall simulate price)))
+
 (let* ((len 1000000)
        (price (make-array len
                           :element-type 'double-float
                           :initial-contents (loop for i fixnum from 0 to (- len 1) collecting (sin (* 2.0 pi (/ i len)))))))
-  (simulate-tactics (cross (price) (ema 0.1d0) 
-                           (bullish)
-                           (bearish)) price)
+  (time (simulate-tactics (cross (price) (ema 0.1d0) 
+                            (bullish)
+                            (bearish)) price))
   ;; (simulate-tactics (cross (price) (ema 0.2d0) 
   ;;                          (bullish)
   ;;                          (bearish)) price)
@@ -252,48 +265,48 @@
   )
 
 
-(defmacro compile-struct-tactics (tact)
-  (let* ((tact (tactics-function tact))
-         (tact-name (symb (synth :name tact))))
-    `(progn
-       (makunbound ',tact-name)
-       (defstruct ,tact-name
-         ,@(map 'list (lambda (s i y) (list s i :type y))
-                (synth :state tact 'strategy)
-                (synth :init tact)
-                (synth :type tact)))
-       (declaim (inline update))
-       (defun update (state price)
-            (declare (type ,tact-name state)
-                     (type double-float price))
-            (symbol-macrolet ,(mapcar #`(,a1 (,(symb tact-name "-" a1) state))
-                                      (synth :state tact 'strategy)) 
-              (values ,(synth :update tact 'strategy 'price) state))))))
+;; (defmacro compile-struct-tactics (tact)
+;;   (let* ((tact (tactics-function tact))
+;;          (tact-name (symb (synth :name tact))))
+;;     `(progn
+;;        (makunbound ',tact-name)
+;;        (defstruct ,tact-name
+;;          ,@(map 'list (lambda (s i y) (list s i :type y))
+;;                 (synth :state tact 'strategy)
+;;                 (synth :init tact)
+;;                 (synth :type tact)))
+;;        (declaim (inline update))
+;;        (defun update (state price)
+;;             (declare (type ,tact-name state)
+;;                      (type double-float price))
+;;             (symbol-macrolet ,(mapcar #`(,a1 (,(symb tact-name "-" a1) state))
+;;                                       (synth :state tact 'strategy)) 
+;;               (values ,(synth :update tact 'strategy 'price) state))))))
 
-(compile-struct-tactics (cross (price) (ema 0.1d0) 
-                        (bullish)
-                        (bearish)))
-(let ((state (make-cross)))
-  ;; (pprint state)
-  (let* ((len 1000000)
-         (price (make-array len
-                            :element-type 'double-float
-                            :initial-contents (loop for i fixnum from 0 to (- len 1) collecting (sin (* 2.0 pi (/ i len)))))))
+;; (compile-struct-tactics (cross (price) (ema 0.1d0) 
+;;                         (bullish)
+;;                         (bearish)))
+;; (let ((state (make-cross)))
+;;   ;; (pprint state)
+;;   (let* ((len 1000000)
+;;          (price (make-array len
+;;                             :element-type 'double-float
+;;                             :initial-contents (loop for i fixnum from 0 to (- len 1) collecting (sin (* 2.0 pi (/ i len)))))))
     
-    ;; (format t "~%~{~20@a~^|~}|~20@a~%" (funcall s :header "") "position")
-    ;; (format t "~v@{~a~:*~}~%" 150 "=")
-    (time (fast-progn
-           (loop for i fixnum from 0 to (- len 1) do
-                (multiple-value-bind (p state)
-                    (update state (the double-float (aref price i)))
-                                        ;(pprint state)
-                  ;; (pprint p)
-                  state
-                  p
-                  ) 
-              ;; (format t "~{~20,8f~^|~}|~20,8f~%" (funcall s :state) pos)
-                )))
-    ))
+;;     ;; (format t "~%~{~20@a~^|~}|~20@a~%" (funcall s :header "") "position")
+;;     ;; (format t "~v@{~a~:*~}~%" 150 "=")
+;;     (time (fast-progn
+;;            (loop for i fixnum from 0 to (- len 1) do
+;;                 (multiple-value-bind (p state)
+;;                     (update state (the double-float (aref price i)))
+;;                                         ;(pprint state)
+;;                   ;; (pprint p)
+;;                   state
+;;                   p
+;;                   ) 
+;;               ;; (format t "~{~20,8f~^|~}|~20,8f~%" (funcall s :state) pos)
+;;                 )))
+;;     ))
 
 
 ;; (defun test ()
@@ -418,4 +431,26 @@
 ;;                    f9 nf2
 ;;                    f10 nf2)
 ;;              p)))))
-
+(declaim (inline lupdate))
+(defun lupdate (l)
+  (symbol-macrolet  ((f1 (car l))
+                     (f2 (cadr l))
+                     (f3 (caddr l)))
+    (declare (type symbol f1)
+             (type double-float f2)
+             (type fixnum f3))
+    (fast-progn 
+     ;; (my-debug l)
+     (setf f1 :above)
+     (setf f2 (the double-float (+ 1.0d0 f2)))
+     (setf f3 (the fixnum (+ 10 f3)))
+     ;; (my-debug l)
+     (values 1 l))))
+(let* ((l (list :init 0.0d0 1)))
+  (time (fast-progn
+         (dotimes (i 100000000)
+           (declare (type fixnum i))
+           (multiple-value-bind (p ln) (lupdate l)
+             p
+             (setf l ln)))
+         (my-debug l))))
